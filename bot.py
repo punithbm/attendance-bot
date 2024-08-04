@@ -13,11 +13,12 @@ load_dotenv()
 # Retrieve environment variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 AUTHORIZED_USERS = os.getenv('AUTHORIZED_USERS')
-AUTHORIZED_USERS_LIST = [int(user_id) for user_id in AUTHORIZED_USERS.split(',')] if AUTHORIZED_USERS else []
+AUTHORIZED_USERNAMES_LIST = AUTHORIZED_USERS.split(',') if AUTHORIZED_USERS else []
+
 
 async def check_user(update: Update) -> bool:
-    user_id = update.message.from_user.id
-    if user_id not in AUTHORIZED_USERS_LIST:
+    user_username = update.message.from_user.username
+    if user_username not in AUTHORIZED_USERNAMES_LIST:
         await update.message.reply_text("You are not authorized to use this bot.")
         return False
     return True
