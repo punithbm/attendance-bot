@@ -65,12 +65,15 @@ async def unpaid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clean_mobile = ''.join(filter(str.isdigit, user['mobile']))
         start_date = user['start_date'].strftime(
             '%Y-%m-%d') if isinstance(user['start_date'], datetime) else user['start_date']
+        last_attended = user['last_date_attended'].strftime(
+            '%Y-%m-%d') if isinstance(user['last_date_attended'], datetime) else user['last_date_attended']
         message = f"ID: {user['id']}\n"
         message += f"Name: {user['name']}\n"
         # message += f"Mobile: {clean_mobile}\n"
         message += f"Mobile: <a href='https://wa.me/{clean_mobile}?text={follow_message}' data-telegram-embed='false'>{user['mobile']}</a>\n"
         message += f"Due Month: {user['Due_Months']}\n"
         message += f"Due From: {start_date}\n"
+        message += f"Last Attended: {last_attended}\n"
 
         keyboard = [
             [
