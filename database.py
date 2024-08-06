@@ -32,6 +32,7 @@ def fetch_unpaid_users(limit=5):
             users.name,
             users.mobile,
             users.batch_id,
+            users.last_date_attended,
             MIN(payment_schedule.start_date) AS start_date,
             MIN(payment_schedule.start_date) AS oldest_due_date,
             MONTHNAME(MIN(payment_schedule.start_date)) AS Due_Months
