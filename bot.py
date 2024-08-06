@@ -69,6 +69,7 @@ async def unpaid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message += f"Name: {user['name']}\n"
         # message += f"Mobile: {clean_mobile}\n"
         message += f"Mobile: <a href='https://wa.me/{clean_mobile}?text={follow_message}' data-telegram-embed='false'>{user['mobile']}</a>\n"
+        message += f"Batch id:{user['batch_id']}\n"
         message += f"Due Month: {user['Due_Months']}\n"
         message += f"Due From: {start_date}\n"
 
@@ -100,6 +101,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     action, user_id, month = query.data.split('_')
+    
+    # Define batch_id here or get it from a reliable source
+    batch_id = 1  # Example value, replace with actual logic if needed
 
     if action == 'paid':
         success = update_payment_status(user_id, month, 'paid')
@@ -108,9 +112,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == 'followup':
         success = update_followup_date(user_id, month)
     elif action == 'pack3':
-        success = update_pack_payment(user_id, month, 3, 1333)
+        success = update_pack_payment(user_id, month, 3, 1500, batch_id)
     elif action == 'pack6':
-        success = update_pack_payment(user_id, month, 6, 1166)
+        success = update_pack_payment(user_id, month, 6, 1500, batch_id)
     elif action == 'inactive':
         success = mark_user_inactive(user_id, month)
 
@@ -118,6 +122,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"Action '{action}' completed successfully for user {user_id}.")
     else:
         await query.edit_message_text(f"Failed to complete action '{action}' for user {user_id}.")
+
+
 
 
 async def paid(update: Update, context: ContextTypes.DEFAULT_TYPE):

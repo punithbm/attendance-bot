@@ -1,8 +1,9 @@
 import mysql.connector
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 import os
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -30,6 +31,7 @@ def fetch_unpaid_users(limit=5):
             users.id,
             users.name,
             users.mobile,
+            users.batch_id,
             MIN(payment_schedule.start_date) AS start_date,
             MIN(payment_schedule.start_date) AS oldest_due_date,
             MONTHNAME(MIN(payment_schedule.start_date)) AS Due_Months
@@ -41,7 +43,7 @@ def fetch_unpaid_users(limit=5):
             payment_schedule.follow_up IS NULL
             OR payment_schedule.follow_up < DATE_SUB(CURRENT_DATE(), INTERVAL 4 DAY)
         GROUP BY
-            users.id, users.name, users.mobile
+            users.id, users.name, users.mobile,users.batch_id
         ORDER BY 
             oldest_due_date ASC
         LIMIT %s;
@@ -56,8 +58,7 @@ def fetch_unpaid_users(limit=5):
 
     return result
 
-
-def update_payment_status(user_id, month, status):
+def update_payment_status(user_id, month_name, status):
     """Update payment status for a user."""
     conn = get_database_connection()
     cursor = conn.cursor()
@@ -67,17 +68,18 @@ def update_payment_status(user_id, month, status):
             query = """
             UPDATE payment_schedule
             SET payment_status = 'paid', amount = 0
-            WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+            WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
             """
+            cursor.execute(query, (user_id, month_name))
         else:
             query = """
             UPDATE payment_schedule
             SET payment_status = %s
-            WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+            WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
             """
-        cursor.execute(query, (user_id, month))
-        conn.commit()
-        return True
+            cursor.execute(query, (status, user_id, month_name))
+            conn.commit()
+            return True
     except mysql.connector.Error as err:
         print(f"Error: {err}")
         conn.rollback()
@@ -87,7 +89,7 @@ def update_payment_status(user_id, month, status):
         conn.close()
 
 
-def update_followup_date(user_id, month):
+def update_followup_date(user_id, month_name):
     """Update follow-up date for a user."""
     conn = get_database_connection()
     cursor = conn.cursor()
@@ -96,10 +98,9 @@ def update_followup_date(user_id, month):
         query = """
         UPDATE payment_schedule
         SET follow_up = CURRENT_DATE()
-        WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+        WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
         """
-
-        cursor.execute(query, (user_id, month))
+        cursor.execute(query, (user_id, month_name))
         conn.commit()
         return True
     except mysql.connector.Error as err:
@@ -109,10 +110,8 @@ def update_followup_date(user_id, month):
     finally:
         cursor.close()
         conn.close()
-
-
-def update_pack_payment(user_id, start_month, pack_months, amount_per_month):
-    """Update payment for a pack (3 or 6 months)."""
+        
+def update_pack_payment(user_id, start_month, pack_months, amount_per_month, batch_id):
     conn = get_database_connection()
     cursor = conn.cursor()
 
@@ -120,22 +119,47 @@ def update_pack_payment(user_id, start_month, pack_months, amount_per_month):
         # Get the start date of the current month
         cursor.execute("""
         SELECT start_date FROM payment_schedule
-        WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+        WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
         """, (user_id, start_month))
-        start_date = cursor.fetchone()[0]
 
+        result = cursor.fetchone()
+        if result:
+            start_date = result[0]
+        else:
+            print("No start date found for the provided user_id and month.")
+            return False
+        print("Result ", result)
         # Update payment status for the pack months
         for i in range(pack_months):
             month_date = start_date + relativedelta(months=i)
-            query = """
-            INSERT INTO payment_schedule (user_id, amount, start_date, end_date, month, payment_status)
-            VALUES (%s, %s, %s, %s, %s, 'paid')
-            ON DUPLICATE KEY UPDATE
-            amount = %s, payment_status = 'paid'
-            """
-            end_date = month_date + relativedelta(day=31)
-            cursor.execute(query, (user_id, amount_per_month, month_date, end_date,
-                                   month_date.strftime('%B'), amount_per_month))
+            # Adjust end_date to cover the full month
+            end_date = (month_date + relativedelta(months=1) - relativedelta(days=1))
+            month_name = month_date.strftime('%B')
+
+            # Check if a record already exists for the month
+            cursor.execute("""
+            SELECT COUNT(*) FROM payment_schedule
+            WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+            """, (user_id, month_name))
+            count = cursor.fetchone()[0]
+
+            if count == 0:
+                # Insert new record if none exists
+                query = """
+                INSERT INTO payment_schedule (user_id, amount, start_date, end_date, month_name, payment_status, batch_id)
+                VALUES (%s, %s, %s, %s, %s, 'paid', %s)
+                """
+                params = (user_id, amount_per_month, month_date, end_date, month_name, batch_id)
+                cursor.execute(query, params)
+            else:
+                # Update existing record if it exists
+                query = """
+                UPDATE payment_schedule
+                SET amount = %s, end_date = %s, payment_status = 'paid', batch_id = %s
+                WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+                """
+                params = (amount_per_month, end_date, batch_id, user_id, month_name)
+                cursor.execute(query, params)
 
         conn.commit()
         return True
@@ -148,7 +172,8 @@ def update_pack_payment(user_id, start_month, pack_months, amount_per_month):
         conn.close()
 
 
-def mark_user_inactive(user_id, month):
+
+def mark_user_inactive(user_id, month_name):
     """Mark a user as inactive, set current month payment to 0 and mark as paid."""
     conn = get_database_connection()
     cursor = conn.cursor()
@@ -158,9 +183,9 @@ def mark_user_inactive(user_id, month):
         query_payment = """
         UPDATE payment_schedule
         SET amount = 0, payment_status = 'paid'
-        WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+        WHERE user_id = %s AND month_name= %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
         """
-        cursor.execute(query_payment, (user_id, month))
+        cursor.execute(query_payment, (user_id, month_name))
 
         # Update user status to inactive
         query_user = """
@@ -179,6 +204,7 @@ def mark_user_inactive(user_id, month):
     finally:
         cursor.close()
         conn.close()
+
 
 
 def fetch_paid_users():
@@ -239,42 +265,42 @@ def update_payment(user_id, amount, months, batch_id):
         print(f"Amount per month: {amount_per_month}")
 
         # Process each month
-        for month in range(months):
+        for i in range(months):
             # Calculate the start and end dates for each month
-            month_start = datetime.now().date() + relativedelta(months=month)
-            month_end = month_start + \
-                relativedelta(day=31) - relativedelta(days=1)
-            month = month_start.strftime('%B')
+            month_start = datetime.now().date() + relativedelta(months=i)
+            month_end = month_start + relativedelta(day=31) - relativedelta(days=1)
+            month_name = month_start.strftime('%B')  # Ensure this matches the column type
             year = month_start.year
 
-            print(f"Processing month: {month} {year}")
+            print(f"Processing month: {month_name} {year}")
 
             # Check if a record already exists for this user and month
             cursor.execute("""
                 SELECT COUNT(*) FROM payment_schedule
-                WHERE user_id = %s
-                AND month = %s
-            """, (user_id, month))
+                WHERE user_id = %s AND month = %s
+            """, (user_id, month_name))
             record_exists = cursor.fetchone()[0]
             print(f"Record exists: {record_exists}")
 
             if record_exists:
                 # Update existing record
-                cursor.execute("""
-                    UPDATE payment_schedule
-                    SET amount = %s, start_date = %s, end_date = %s, batch_id = %s, payment_status = 'Due'
-                    WHERE user_id = %s AND month = %s
-                """, (amount_per_month, month_start, month_end, batch_id, user_id, month))
-                print(
-                    f"Updated record for user_id {user_id} for {month} {year}")
+                query = """
+                UPDATE payment_schedule
+                SET amount = %s, start_date = %s, end_date = %s, batch_id = %s, payment_status = 'Due'
+                WHERE user_id = %s AND month = %s
+                """
+                params = (amount_per_month, month_start, month_end, batch_id, user_id, month_name)
+                cursor.execute(query, params)
+                print(f"Updated record for user_id {user_id} for {month_name} {year}")
             else:
                 # Insert new record
-                cursor.execute("""
-                    INSERT INTO payment_schedule (user_id, amount, start_date, end_date, batch_id, month, payment_status)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'Due')
-                """, (user_id, amount_per_month, month_start, month_end, batch_id, month))
-                print(
-                    f"Inserted new record for user_id {user_id} for {month} {year}")
+                query = """
+                INSERT INTO payment_schedule (user_id, amount, start_date, end_date, batch_id, month, payment_status)
+                VALUES (%s, %s, %s, %s, %s, %s, 'Due')
+                """
+                params = (user_id, amount_per_month, month_start, month_end, batch_id, month_name)
+                cursor.execute(query, params)
+                print(f"Inserted new record for user_id {user_id} for {month_name} {year}")
 
         # Commit the transaction
         conn.commit()
