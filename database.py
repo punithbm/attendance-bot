@@ -63,7 +63,7 @@ def update_payment_status(user_id, month_name, status):
     """Update payment status for a user."""
     conn = get_database_connection()
     cursor = conn.cursor()
-
+    
     try:
         if status == 'ignore':
             query = """
@@ -79,8 +79,9 @@ def update_payment_status(user_id, month_name, status):
             WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
             """
             cursor.execute(query, (status, user_id, month_name))
-            conn.commit()
-            return True
+        
+        conn.commit()
+        return True
     except mysql.connector.Error as err:
         print(f"Error: {err}")
         conn.rollback()
@@ -88,6 +89,7 @@ def update_payment_status(user_id, month_name, status):
     finally:
         cursor.close()
         conn.close()
+
 
 
 def update_followup_date(user_id, month_name):
