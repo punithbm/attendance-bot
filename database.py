@@ -114,6 +114,17 @@ def update_followup_date(user_id, month_name):
         cursor.close()
         conn.close()
         
+        
+def get_batch_id_for_user(user_id):
+    # Fetch the batch_id from the database or other source
+    conn = get_database_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT batch_id FROM users WHERE id = %s", (user_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return result[0] if result else 1  # Default batch_id if none found        
+        
 def update_pack_payment(user_id, start_month, pack_months, amount_per_month, batch_id):
     conn = get_database_connection()
     cursor = conn.cursor()
@@ -131,7 +142,7 @@ def update_pack_payment(user_id, start_month, pack_months, amount_per_month, bat
         else:
             print("No start date found for the provided user_id and month.")
             return False
-        print("Result ", result)
+        #print("Result ", result)
         # Update payment status for the pack months
         for i in range(pack_months):
             month_date = start_date + relativedelta(months=i)

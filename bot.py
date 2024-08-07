@@ -4,7 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
-from database import fetch_unpaid_users, update_payment_status, update_followup_date, update_pack_payment, mark_user_inactive
+from database import fetch_unpaid_users, update_payment_status, update_followup_date, update_pack_payment, mark_user_inactive,get_batch_id_for_user
 from datetime import datetime
 from urllib.parse import quote
 
@@ -105,8 +105,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     action, user_id, month = query.data.split('_')
     
-    # Define batch_id here or get it from a reliable source
-    batch_id = 1  # Example value, replace with actual logic if needed
+       # Retrieve the batch_id dynamically
+    batch_id = get_batch_id_for_user(user_id)
 
     if action == 'paid':
         success = update_payment_status(user_id, month, 'paid')
