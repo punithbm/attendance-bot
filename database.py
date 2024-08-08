@@ -29,7 +29,7 @@ def fetch_user_details(search_term):
             users.mobile,
             users.batch_id,
             COALESCE(MAX(payment_schedule.start_date), 'N/A') AS last_payment_date,
-            COUNT(attendance.id) AS days_attended
+            COUNT(DISTINCT attendance.date) AS days_attended  -- Count distinct attendance dates
         FROM
             users
             LEFT JOIN payment_schedule ON users.id = payment_schedule.user_id AND payment_schedule.payment_status = 'paid'
