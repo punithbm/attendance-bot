@@ -1,16 +1,14 @@
 import os
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.constants import ParseMode
-from telegram import BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
-from database import fetch_unpaid_users, update_payment_status, update_followup_date, update_pack_payment, mark_user_inactive,get_batch_id_for_user
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters, CallbackContext
+from database import fetch_user_details, fetch_unpaid_users, update_payment_status, update_followup_date, get_batch_id_for_user, update_pack_payment, mark_user_inactive
 from datetime import datetime
 from urllib.parse import quote
 
-from database import fetch_unpaid_users, fetch_paid_users, update_payment
-
-USER_ID, AMOUNT, MONTHS, BATCH_ID = range(4)
+# Define states for the conversation
+INPUT_NAME_OR_PHONE = range(1)
 
 # Load environment variables
 load_dotenv()
@@ -18,9 +16,7 @@ load_dotenv()
 # Retrieve environment variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 AUTHORIZED_USERS = os.getenv('AUTHORIZED_USERS')
-AUTHORIZED_USERNAMES_LIST = AUTHORIZED_USERS.split(
-    ',') if AUTHORIZED_USERS else []
-
+AUTHORIZED_USERNAMES_LIST = AUTHORIZED_USERS.split(',') if AUTHORIZED_USERS else []
 
 async def check_user(update: Update) -> bool:
     user_username = update.message.from_user.username
@@ -29,16 +25,14 @@ async def check_user(update: Update) -> bool:
         return False
     return True
 
-
 async def setup_commands(application: Application):
     commands = [
         BotCommand("start", "Start the bot"),
         BotCommand("unpaid", "View unpaid users"),
         BotCommand("paid", "View paid users"),
-        BotCommand("update_payment", "Update payment information")
+        BotCommand("userdetails", "Get user details by phone number or name")
     ]
     await application.bot.set_my_commands(commands)
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_user(update):
@@ -46,10 +40,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'Hello! Here are the available commands:\n'
         '/unpaid - View unpaid users\n'
-        '/paid - View paid users\n'
-        '/update_payment - Update payment information'
+        '/userdetails - Get user details by phone number or name'
     )
-
 
 async def unpaid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     follow_message = quote(
@@ -125,112 +117,55 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"Action '{action}' completed successfully for user {user_id}.")
     else:
         await query.edit_message_text(f"Failed to complete action '{action}' for user {user_id}.")
-
-
-
-
-async def paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        
+async def user_details_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start the conversation and ask for user details."""
     if not await check_user(update):
-        return
-    users = fetch_paid_users()
+        return ConversationHandler.END
+    
+    await update.message.reply_text(
+        "Please provide the phone number or name of the user you want to get details for:"
+    )
+    return INPUT_NAME_OR_PHONE
 
-    if not users:
-        await update.message.reply_text('No paid users found for the current month.')
-        return
+async def get_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle user input and fetch details."""
+    search_term = update.message.text
+    user = fetch_user_details(search_term)  # Call the new function
 
-    message = "Paid Users for this Month:\n\n"
-    for user in users:
-        clean_mobile = ''.join(filter(str.isdigit, user['mobile']))
-        message = f"ID: {user['id']}\n"
-        message += f"Name: {user['name']}\n"
-        message += f"Mobile: <a href='https://wa.me/{clean_mobile}' data-telegram-embed='false'>{user['mobile']}</a>\n"
-        message += f"Amount: {user['amount']}\n\n"
-
-        if len(message) > 4000:
-            await update.message.reply_text(message,  disable_web_page_preview=True, parse_mode=ParseMode.HTML)
-            message = ""
-
-    if message:
-        await update.message.reply_text(message, disable_web_page_preview=True, parse_mode=ParseMode.HTML)
-
-
-async def update_payment_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_user(update):
-        return
-    await update.message.reply_text('Please enter the user ID:')
-    return USER_ID
-
-
-async def user_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['user_id'] = update.message.text
-    await update.message.reply_text('Please enter the amount:')
-    return AMOUNT
-
-
-async def amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        context.user_data['amount'] = float(update.message.text)
-        await update.message.reply_text('Please enter the number of months:')
-        return MONTHS
-    except ValueError:
-        await update.message.reply_text('Please enter a valid amount.')
-        return AMOUNT
-
-
-async def months(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        context.user_data['months'] = int(update.message.text)
-        await update.message.reply_text('Please enter the batch ID:')
-        return BATCH_ID
-    except ValueError:
-        await update.message.reply_text('Please enter a valid number of months.')
-        return MONTHS
-
-
-async def batch_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['batch_id'] = update.message.text
-    user_id = context.user_data['user_id']
-    amount = context.user_data['amount']
-    months = context.user_data['months']
-    batch_id = context.user_data['batch_id']
-
-    if update_payment(user_id, amount, months, batch_id):
-        await update.message.reply_text('Payment information updated successfully.')
+    if not user:
+        await update.message.reply_text("No user found with the given phone number or name.")
     else:
-        await update.message.reply_text('Failed to update payment information.')
+        message = (
+            f"Name: {user['name']}\n"
+            f"Phone number: {user['mobile']}\n"
+            f"Batch: {user['batch_id']}\n"
+            f"Last payment made date: {user['last_payment_date']}\n"
+            f"No. Of days class attended: {user['days_attended']}"
+        )
+        await update.message.reply_text(message)
 
-    return ConversationHandler.END
-
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_user(update):
-        return
-    await update.message.reply_text('Update payment process cancelled.')
     return ConversationHandler.END
 
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('update_payment', update_payment_start)],
+    # Define the conversation handler
+    user_details_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('userdetails', user_details_start)],
         states={
-            USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, user_id)],
-            AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, amount)],
-            MONTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, months)],
-            BATCH_ID: [MessageHandler(
-                filters.TEXT & ~filters.COMMAND, batch_id)]
+            INPUT_NAME_OR_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_user_details)],
         },
-        fallbacks=[CommandHandler('cancel', cancel)]
+        fallbacks=[]
     )
-
+    
+    # Add handlers to the application
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('unpaid', unpaid))
-    application.add_handler(CommandHandler('paid', paid))
     application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(conv_handler)
+    application.add_handler(user_details_conv_handler)
 
     application.run_polling()
-
 
 if __name__ == '__main__':
     main()
