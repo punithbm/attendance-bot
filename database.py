@@ -100,14 +100,14 @@ def update_payment_status(user_id, month_name, status):
             query = """
             UPDATE payment_schedule
             SET payment_status = 'paid', amount = 0
-            WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+            WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
             """
             cursor.execute(query, (user_id, month_name))
         else:
             query = """
             UPDATE payment_schedule
             SET payment_status = %s
-            WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+            WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
             """
             cursor.execute(query, (status, user_id, month_name))
         
@@ -132,7 +132,7 @@ def update_followup_date(user_id, month_name):
         query = """
         UPDATE payment_schedule
         SET follow_up = CURRENT_DATE()
-        WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+        WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
         """
         cursor.execute(query, (user_id, month_name))
         conn.commit()
@@ -164,7 +164,7 @@ def update_pack_payment(user_id, start_month, pack_months, amount_per_month, bat
         # Get the start date of the current month
         cursor.execute("""
         SELECT start_date FROM payment_schedule
-        WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+        WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
         """, (user_id, start_month))
 
         result = cursor.fetchone()
@@ -184,14 +184,14 @@ def update_pack_payment(user_id, start_month, pack_months, amount_per_month, bat
             # Check if a record already exists for the month
             cursor.execute("""
             SELECT COUNT(*) FROM payment_schedule
-            WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+            WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
             """, (user_id, month_name))
             count = cursor.fetchone()[0]
 
             if count == 0:
                 # Insert new record if none exists
                 query = """
-                INSERT INTO payment_schedule (user_id, amount, start_date, end_date, month_name, payment_status, batch_id)
+                INSERT INTO payment_schedule (user_id, amount, start_date, end_date, month, payment_status, batch_id)
                 VALUES (%s, %s, %s, %s, %s, 'paid', %s)
                 """
                 params = (user_id, amount_per_month, month_date, end_date, month_name, batch_id)
@@ -201,7 +201,7 @@ def update_pack_payment(user_id, start_month, pack_months, amount_per_month, bat
                 query = """
                 UPDATE payment_schedule
                 SET amount = %s, end_date = %s, payment_status = 'paid', batch_id = %s
-                WHERE user_id = %s AND month_name = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+                WHERE user_id = %s AND month = %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
                 """
                 params = (amount_per_month, end_date, batch_id, user_id, month_name)
                 cursor.execute(query, params)
@@ -228,7 +228,7 @@ def mark_user_inactive(user_id, month_name):
         query_payment = """
         UPDATE payment_schedule
         SET amount = 0, payment_status = 'paid'
-        WHERE user_id = %s AND month_name= %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
+        WHERE user_id = %s AND month= %s AND YEAR(start_date) = YEAR(CURRENT_DATE())
         """
         cursor.execute(query_payment, (user_id, month_name))
 
