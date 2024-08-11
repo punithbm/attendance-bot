@@ -107,9 +107,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == 'followup':
         success = update_followup_date(user_id, month)
     elif action == 'pack3':
-        success = update_pack_payment(user_id, month, 3, 1500, batch_id)
+        success = update_pack_payment(user_id, month, 3, 1333, batch_id)
     elif action == 'pack6':
-        success = update_pack_payment(user_id, month, 6, 1500, batch_id)
+        success = update_pack_payment(user_id, month, 6, 1166, batch_id)
     elif action == 'inactive':
         success = mark_user_inactive(user_id, month)
 
