@@ -241,6 +241,13 @@ def mark_user_inactive(user_id, month_name):
         """
         cursor.execute(query_payment, (user_id, month_name))
 
+        # Delete future payment schedules
+        query_delete_future = """
+        DELETE FROM payment_schedule
+        WHERE user_id = %s AND start_date > LAST_DAY(CURRENT_DATE())
+        """
+        cursor.execute(query_delete_future, (user_id,))
+
         # Update user status to inactive
         query_user = """
         UPDATE users
