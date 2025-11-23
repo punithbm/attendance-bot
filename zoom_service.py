@@ -168,6 +168,24 @@ async def get_meetings_by_date_range(access_token, user_id, from_date, to_date):
                     break
                 else:
                     print(f"Response Error: {response_text}")
+                    # Check for scope/permission errors
+                    try:
+                        error_data = json.loads(response_text)
+                        if error_data.get('code') == 4711 or 'scope' in error_data.get('message', '').lower():
+                            print("\n" + "!"*80)
+                            print("PERMISSION ERROR: Missing required Zoom API scope!")
+                            print("!"*80)
+                            print("Required scope: report:read:user:admin")
+                            print("\nTo fix this:")
+                            print("1. Go to https://marketplace.zoom.us/")
+                            print("2. Navigate to 'Develop' > 'Build App' > Your App")
+                            print("3. Go to the 'Scopes' tab")
+                            print("4. Add the scope: 'View user meeting reports' (report:read:user:admin)")
+                            print("5. Save and re-authorize your app")
+                            print("6. Restart the bot service")
+                            print("!"*80 + "\n")
+                    except:
+                        pass
                     break
     
     return all_meetings
@@ -217,6 +235,24 @@ async def get_meeting_participants(access_token, meeting_uuid):
                     page_num += 1
                 else:
                     print(f"Response Error: {response_text}")
+                    # Check for scope/permission errors
+                    try:
+                        error_data = json.loads(response_text)
+                        if error_data.get('code') == 4711 or 'scope' in error_data.get('message', '').lower():
+                            print("\n" + "!"*80)
+                            print("PERMISSION ERROR: Missing required Zoom API scope!")
+                            print("!"*80)
+                            print("Required scope: report:read:user:admin")
+                            print("\nTo fix this:")
+                            print("1. Go to https://marketplace.zoom.us/")
+                            print("2. Navigate to 'Develop' > 'Build App' > Your App")
+                            print("3. Go to the 'Scopes' tab")
+                            print("4. Add the scope: 'View user meeting reports' (report:read:user:admin)")
+                            print("5. Save and re-authorize your app")
+                            print("6. Restart the bot service")
+                            print("!"*80 + "\n")
+                    except:
+                        pass
                     break
     
     return participants
