@@ -9,6 +9,26 @@ from urllib.parse import quote, urlencode
 
 load_dotenv()
 
+def format_date_with_ordinal(date_str):
+    """
+    Format date string (YYYY-MM-DD) to format like "23rd Nov 2025"
+    """
+    try:
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        day = date_obj.day
+        
+        # Get ordinal suffix
+        if 10 <= day % 100 <= 20:
+            suffix = 'th'
+        else:
+            suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th')
+        
+        # Format: "23rd Nov 2025"
+        formatted = date_obj.strftime(f"%d{suffix} %b %Y")
+        return formatted
+    except:
+        return date_str
+
 ZOOM_ACCOUNT_ID = os.getenv('ZOOM_ACCOUNT_ID')
 ZOOM_CLIENT_ID = os.getenv('ZOOM_CLIENT_ID')
 ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET')
@@ -266,8 +286,11 @@ async def get_attendance_report(target_date_str=None):
     # Sort batches for consistent output
     sorted_batches = sorted(BATCH_IDS.keys())
     
+    # Format date with ordinal (e.g., "23rd Nov 2025")
+    formatted_date = format_date_with_ordinal(target_date_str)
+    
     # Use HTML format which is more forgiving with special characters
-    final_message = f"<b>Attendance Report for {target_date_str}</b>\n\n"
+    final_message = f"<b>Attendance Report for {formatted_date}</b>\n\n"
     
     for batch in sorted_batches:
         if batch in found_batches:
