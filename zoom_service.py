@@ -59,9 +59,11 @@ async def get_past_meeting_instances(access_token, meeting_id):
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
-                return data.get('meetings', [])
+                meetings = data.get('meetings', [])
+                return meetings
             elif response.status == 404:
                 # Meeting ID not found or expired
+                print(f"Meeting {meeting_id} not found or has no past instances (404)")
                 return []
             else:
                 error_text = await response.text()
@@ -123,7 +125,13 @@ async def get_attendance_report(target_date_str=None):
     except ValueError:
         return f"Invalid date format: {target_date_str}. Please use YYYY-MM-DD."
 
+    # Validate that the date is not in the future
+    today = datetime.now().date()
+    if target_date > today:
+        return f"Date {target_date_str} is in the future. Please provide a past date or today's date."
+
     found_batches = {}
+    total_instances_checked = 0
     
     # Sort batches to process in order
     sorted_batches = sorted(BATCH_IDS.keys())
@@ -131,33 +139,35 @@ async def get_attendance_report(target_date_str=None):
     for batch_name in sorted_batches:
         meeting_id = BATCH_IDS[batch_name]
         instances = await get_past_meeting_instances(token, meeting_id)
+        total_instances_checked += len(instances)
         
         # Find instance that matches the target date
         matched_instance = None
         for instance in instances:
-            start_time_str = instance.get('start_time') # UTC time, e.g., 2025-11-23T10:50:26Z
+            start_time_str = instance.get('start_time')
             if not start_time_str:
                 continue
                 
             try:
-                # Parse UTC time
-                dt_utc = datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M:%SZ")
+                # Parse UTC time - handle both with and without milliseconds
+                if '.' in start_time_str and 'Z' in start_time_str:
+                    # Format: 2025-11-23T10:50:26.123Z
+                    dt_utc = datetime.strptime(start_time_str.split('.')[0] + 'Z', "%Y-%m-%dT%H:%M:%SZ")
+                else:
+                    # Format: 2025-11-23T10:50:26Z
+                    dt_utc = datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M:%SZ")
+                
                 # Convert to IST (UTC+5:30)
                 dt_ist = dt_utc + timedelta(hours=5, minutes=30)
                 
                 if dt_ist.date() == target_date:
                     matched_instance = instance
-                    # We found the instance for this date, break (assuming one per day per batch)
-                    # If there are multiple, we might want the latest? But usually one class per day.
-                    # Let's take the last one found if multiple? Or list all?
-                    # For now, let's assume one and take it.
-                    # Actually, if there are multiple, we should probably list them all?
-                    # But the structure is designed for one. Let's stick to the first one found or last?
-                    # Instances are usually returned most recent first? No, documentation says "start_time" order?
-                    # Let's just pick the first one matching the date.
                     break
+            except ValueError as e:
+                print(f"Error parsing date {start_time_str} for {batch_name}: {e}")
+                continue
             except Exception as e:
-                print(f"Error parsing date {start_time_str}: {e}")
+                print(f"Unexpected error parsing date {start_time_str} for {batch_name}: {e}")
                 continue
         
         if matched_instance:
@@ -166,6 +176,10 @@ async def get_attendance_report(target_date_str=None):
             
             uuid = matched_instance.get('uuid')
             start_time = matched_instance.get('start_time')
+            
+            if not uuid:
+                print(f"Warning: No UUID found for matched instance in {batch_name}")
+                continue
             
             participants = await get_meeting_participants(token, uuid)
             
@@ -179,13 +193,17 @@ async def get_attendance_report(target_date_str=None):
             unique_names.discard("Apoorva Yoga") 
             
             found_batches[batch_name].append({
-                "topic": batch_name, # Use batch name as topic since we know it
+                "topic": batch_name,
                 "start_time": start_time,
                 "participants": sorted(list(unique_names))
             })
 
     if not found_batches:
-        return f"No Batch meetings found for {target_date_str}."
+        # Provide more helpful error message
+        if total_instances_checked == 0:
+            return f"No Batch meetings found for {target_date_str}.\n\nPossible reasons:\n- No past meeting instances available\n- Meeting IDs may be incorrect\n- Meetings may not have occurred on this date"
+        else:
+            return f"No Batch meetings found for {target_date_str}.\n\nChecked {total_instances_checked} meeting instances across all batches, but none matched the date {target_date_str} (IST)."
 
     final_message = f"**Attendance Report for {target_date_str}**\n\n"
     
@@ -195,7 +213,11 @@ async def get_attendance_report(target_date_str=None):
             for meeting in found_batches[batch]:
                 # Parse start time for better display
                 try:
-                    dt = datetime.strptime(meeting['start_time'], "%Y-%m-%dT%H:%M:%SZ")
+                    start_time_str = meeting['start_time']
+                    if '.' in start_time_str and 'Z' in start_time_str:
+                        dt = datetime.strptime(start_time_str.split('.')[0] + 'Z', "%Y-%m-%dT%H:%M:%SZ")
+                    else:
+                        dt = datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M:%SZ")
                     dt_ist = dt + timedelta(hours=5, minutes=30)
                     time_str = dt_ist.strftime("%I:%M %p")
                 except:
