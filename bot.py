@@ -152,14 +152,27 @@ async def get_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch and display attendance report."""
+    """Fetch and display attendance report. Usage: /attendance [dd-mm-yyyy]"""
     if not await check_user(update):
         return
 
-    await update.message.reply_text("Fetching attendance data from Zoom... This may take a moment.")
+    # Check for date argument
+    target_date = None
+    if context.args:
+        date_input = context.args[0]
+        try:
+            # Parse dd-mm-yyyy
+            dt = datetime.strptime(date_input, "%d-%m-%Y")
+            # Convert to YYYY-MM-DD for the service
+            target_date = dt.strftime("%Y-%m-%d")
+        except ValueError:
+            await update.message.reply_text("Invalid date format. Please use dd-mm-yyyy (e.g., 23-11-2025).")
+            return
+
+    await update.message.reply_text(f"Fetching attendance data from Zoom for {'today' if not target_date else target_date}... This may take a moment.")
     
     try:
-        report = await get_attendance_report()
+        report = await get_attendance_report(target_date)
         # Split message if it's too long (Telegram limit is 4096 chars)
         if len(report) > 4000:
             for x in range(0, len(report), 4000):

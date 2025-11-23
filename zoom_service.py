@@ -4,6 +4,7 @@ import base64
 import json
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from urllib.parse import quote
 
 load_dotenv()
 
@@ -14,6 +15,14 @@ ZOOM_HOST_EMAIL = os.getenv('ZOOM_HOST_EMAIL')
 
 BASE_URL = "https://api.zoom.us/v2"
 AUTH_URL = "https://zoom.us/oauth/token"
+
+# Map of Batch Name to Meeting ID (stripped of spaces)
+BATCH_IDS = {
+    "Batch 1": "83527645001",
+    "Batch 2": "88002278840",
+    "Batch 3": "81387781923",
+    "Batch 4": "88554007453"
+}
 
 async def get_zoom_access_token():
     """
@@ -39,43 +48,37 @@ async def get_zoom_access_token():
                 print(f"Error getting access token: {response.status} - {error_text}")
                 return None
 
-async def get_past_meetings(access_token, date_str):
+async def get_past_meeting_instances(access_token, meeting_id):
     """
-    Fetch past meetings for the host on a specific date.
+    Fetch past instances of a recurring meeting.
     """
     headers = {"Authorization": f"Bearer {access_token}"}
-    # Zoom API format for date is YYYY-MM-DD
-    # We want meetings that started on this date.
-    # List meetings endpoint: /users/{userId}/meetings (scheduled) or /metrics/meetings (dashboard)
-    # Better to use /report/users/{userId}/meetings for past meetings
-    
-    # Using /report/users/{userId}/meetings
-    url = f"{BASE_URL}/report/users/{ZOOM_HOST_EMAIL}/meetings"
-    params = {
-        "from": date_str,
-        "to": date_str,
-        "page_size": 300,
-        "type": "past"
-    }
+    url = f"{BASE_URL}/past_meetings/{meeting_id}/instances"
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params=params) as response:
+        async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
-                # Debugging: Print the raw data to console/logs
-                print(f"DEBUG: Fetched meetings for {date_str}: {data}")
                 return data.get('meetings', [])
+            elif response.status == 404:
+                # Meeting ID not found or expired
+                return []
             else:
                 error_text = await response.text()
-                print(f"Error fetching meetings: {response.status} - {error_text}")
+                print(f"Error fetching instances for {meeting_id}: {response.status} - {error_text}")
                 return []
 
-async def get_meeting_participants(access_token, meeting_id):
+async def get_meeting_participants(access_token, meeting_uuid):
     """
-    Fetch participants for a specific meeting.
+    Fetch participants for a specific meeting instance UUID.
     """
     headers = {"Authorization": f"Bearer {access_token}"}
-    url = f"{BASE_URL}/report/meetings/{meeting_id}/participants"
+    # Double encode UUID if it starts with / or contains special chars, but usually for query param it's fine.
+    # For path param, it needs to be double encoded if it contains '/'
+    if meeting_uuid.startswith('/') or '//' in meeting_uuid:
+         meeting_uuid = quote(quote(meeting_uuid, safe=''), safe='')
+         
+    url = f"{BASE_URL}/report/meetings/{meeting_uuid}/participants"
     params = {
         "page_size": 300
     }
@@ -97,75 +100,74 @@ async def get_meeting_participants(access_token, meeting_id):
                         break
                 else:
                     error_text = await response.text()
-                    print(f"Error fetching participants: {response.status} - {error_text}")
+                    print(f"Error fetching participants for {meeting_uuid}: {response.status} - {error_text}")
                     break
     
     return participants
 
-async def get_attendance_report():
+async def get_attendance_report(target_date_str=None):
     """
     Orchestrate fetching and formatting the attendance report.
+    target_date_str: 'YYYY-MM-DD' format. If None, defaults to today.
     """
     token = await get_zoom_access_token()
     if not token:
         return "Failed to authenticate with Zoom."
 
-    today = datetime.now().strftime('%Y-%m-%d')
-    # Try fetching for yesterday and today to handle timezone differences
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    if not target_date_str:
+        target_date_str = datetime.now().strftime('%Y-%m-%d')
     
-    # Fetch both and combine
-    meetings_today = await get_past_meetings(token, today)
-    meetings_yesterday = await get_past_meetings(token, yesterday)
-    
-    meetings = meetings_today + meetings_yesterday
-    
-    
-    if not meetings:
-        return f"No meetings found for today ({today}) or yesterday ({yesterday}). Debug info: Checked email {ZOOM_HOST_EMAIL}"
+    # Parse target date to compare
+    try:
+        target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return f"Invalid date format: {target_date_str}. Please use YYYY-MM-DD."
 
-    # Map of Batch Name to Meeting ID (stripped of spaces)
-    BATCH_IDS = {
-        "83527645001": "Batch 1",
-        "88002278840": "Batch 2",
-        "81387781923": "Batch 3",
-        "88554007453": "Batch 4"
-    }
-    
     found_batches = {}
+    
+    # Sort batches to process in order
+    sorted_batches = sorted(BATCH_IDS.keys())
 
-    for meeting in meetings:
-        topic = meeting.get('topic', '')
-        meeting_id = str(meeting.get('id')) # Ensure it's a string
-        start_time = meeting.get('start_time')
+    for batch_name in sorted_batches:
+        meeting_id = BATCH_IDS[batch_name]
+        instances = await get_past_meeting_instances(token, meeting_id)
         
-        # Check if meeting_id matches one of our batches
-        matched_batch = BATCH_IDS.get(meeting_id)
-        
-        # Fallback to topic matching if ID doesn't match (just in case)
-        if not matched_batch:
-             for batch_name in ["Batch 1", "Batch 2", "Batch 3", "Batch 4"]:
-                if batch_name.lower() in topic.lower():
-                    matched_batch = batch_name
+        # Find instance that matches the target date
+        matched_instance = None
+        for instance in instances:
+            start_time_str = instance.get('start_time') # UTC time, e.g., 2025-11-23T10:50:26Z
+            if not start_time_str:
+                continue
+                
+            try:
+                # Parse UTC time
+                dt_utc = datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M:%SZ")
+                # Convert to IST (UTC+5:30)
+                dt_ist = dt_utc + timedelta(hours=5, minutes=30)
+                
+                if dt_ist.date() == target_date:
+                    matched_instance = instance
+                    # We found the instance for this date, break (assuming one per day per batch)
+                    # If there are multiple, we might want the latest? But usually one class per day.
+                    # Let's take the last one found if multiple? Or list all?
+                    # For now, let's assume one and take it.
+                    # Actually, if there are multiple, we should probably list them all?
+                    # But the structure is designed for one. Let's stick to the first one found or last?
+                    # Instances are usually returned most recent first? No, documentation says "start_time" order?
+                    # Let's just pick the first one matching the date.
                     break
+            except Exception as e:
+                print(f"Error parsing date {start_time_str}: {e}")
+                continue
         
-        if matched_batch:
-            if matched_batch not in found_batches:
-                found_batches[matched_batch] = []
+        if matched_instance:
+            if batch_name not in found_batches:
+                found_batches[batch_name] = []
             
-            # Use the UUID for fetching participants if available, otherwise ID
-            # The API for participants usually takes the UUID for past meetings to be precise, 
-            # or the meetingId (which might return the latest if not careful, but here we are iterating past meetings)
-            # Actually, for /report/meetings/{meetingId}/participants, meetingId can be the number or UUID.
-            # Using UUID is safer for past meetings.
-            meeting_uuid = meeting.get('uuid')
+            uuid = matched_instance.get('uuid')
+            start_time = matched_instance.get('start_time')
             
-            # If uuid starts with /, it needs to be double encoded, but usually it's fine.
-            # Let's try using the numeric ID first as it's simpler, or UUID if ID fails? 
-            # The previous code used meeting_id (numeric). Let's stick to that but maybe try UUID if needed.
-            # Actually, for past meetings, using the UUID is recommended.
-            
-            participants = await get_meeting_participants(token, meeting_uuid if meeting_uuid else meeting_id)
+            participants = await get_meeting_participants(token, uuid)
             
             # Deduplicate by name
             unique_names = set()
@@ -176,39 +178,35 @@ async def get_attendance_report():
             
             unique_names.discard("Apoorva Yoga") 
             
-            found_batches[matched_batch].append({
-                "topic": topic,
+            found_batches[batch_name].append({
+                "topic": batch_name, # Use batch name as topic since we know it
                 "start_time": start_time,
                 "participants": sorted(list(unique_names))
             })
 
     if not found_batches:
-        return f"No Batch meetings found for today ({today})."
+        return f"No Batch meetings found for {target_date_str}."
 
-    final_message = f"**Attendance Report for {today}**\n\n"
+    final_message = f"**Attendance Report for {target_date_str}**\n\n"
     
-    # Sort batches to ensure 1, 2, 3, 4 order
-    sorted_batch_keys = sorted(found_batches.keys())
-    
-    for batch in sorted_batch_keys:
-        final_message += f"**{batch}**\n"
-        for meeting in found_batches[batch]:
-            # Parse start time for better display
-            try:
-                dt = datetime.strptime(meeting['start_time'], "%Y-%m-%dT%H:%M:%SZ")
-                # Convert to IST roughly or just show UTC? User is in IST (screenshot shows IST).
-                # Adding 5:30 for IST
-                dt_ist = dt + timedelta(hours=5, minutes=30)
-                time_str = dt_ist.strftime("%I:%M %p")
-            except:
-                time_str = meeting['start_time']
+    for batch in sorted_batches:
+        if batch in found_batches:
+            final_message += f"**{batch}**\n"
+            for meeting in found_batches[batch]:
+                # Parse start time for better display
+                try:
+                    dt = datetime.strptime(meeting['start_time'], "%Y-%m-%dT%H:%M:%SZ")
+                    dt_ist = dt + timedelta(hours=5, minutes=30)
+                    time_str = dt_ist.strftime("%I:%M %p")
+                except:
+                    time_str = meeting['start_time']
 
-            final_message += f"_{meeting['topic']} ({time_str})_\n"
-            if meeting['participants']:
-                for name in meeting['participants']:
-                    final_message += f"- {name}\n"
-            else:
-                final_message += "No participants found.\n"
-        final_message += "\n"
+                final_message += f"_Time: {time_str}_\n"
+                if meeting['participants']:
+                    for name in meeting['participants']:
+                        final_message += f"- {name}\n"
+                else:
+                    final_message += "No participants found.\n"
+            final_message += "\n"
 
     return final_message
