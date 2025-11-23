@@ -25,79 +25,6 @@ BATCH_IDS = {
     "Batch 4": "88554007453"
 }
 
-def escape_markdown_v2(text):
-    """
-    Escape special characters for Telegram MarkdownV2 format.
-    """
-    if not text:
-        return text
-    # Characters that need escaping in MarkdownV2
-    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    escaped = str(text)
-    for char in special_chars:
-        escaped = escaped.replace(char, f'\\{char}')
-    return escaped
-
-def escape_markdown(text):
-    """
-    Escape special characters for Telegram Markdown format (simpler version).
-    """
-    if not text:
-        return text
-    # Characters that need escaping in Markdown
-    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    escaped = str(text)
-    for char in special_chars:
-        escaped = escaped.replace(char, f'\\{char}')
-    return escaped
-
-def log_api_request(method, url, headers=None, params=None, data=None, body=None):
-    """
-    Log API request details in a format suitable for Postman testing.
-    """
-    print("\n" + "="*80)
-    print("ZOOM API REQUEST - POSTMAN FORMAT")
-    print("="*80)
-    print(f"Method: {method}")
-    print(f"URL: {url}")
-    
-    if params:
-        # Build URL with query params
-        query_string = urlencode(params)
-        full_url = f"{url}?{query_string}" if query_string else url
-        print(f"Full URL with params: {full_url}")
-        print(f"\nQuery Parameters:")
-        for key, value in params.items():
-            print(f"  {key}: {value}")
-    
-    if headers:
-        print(f"\nHeaders:")
-        for key, value in headers.items():
-            # Mask access token for security but show format
-            if key.lower() == 'authorization' and 'Bearer' in value:
-                masked_token = value[:20] + "..." + value[-10:] if len(value) > 30 else "***MASKED***"
-                print(f"  {key}: {masked_token}")
-            elif key.lower() == 'authorization' and 'Basic' in value:
-                print(f"  {key}: Basic ***MASKED***")
-            else:
-                print(f"  {key}: {value}")
-    
-    if data:
-        print(f"\nBody (form-data):")
-        if isinstance(data, dict):
-            for key, value in data.items():
-                print(f"  {key}: {value}")
-        else:
-            print(f"  {data}")
-    
-    if body:
-        print(f"\nBody (JSON):")
-        if isinstance(body, dict):
-            print(json.dumps(body, indent=2))
-        else:
-            print(body)
-    
-    print("="*80 + "\n")
 
 async def get_zoom_access_token():
     """
@@ -113,19 +40,14 @@ async def get_zoom_access_token():
         "account_id": ZOOM_ACCOUNT_ID
     }
 
-    # Log request for Postman
-    log_api_request("POST", AUTH_URL, headers=headers, data=data)
-
     async with aiohttp.ClientSession() as session:
         async with session.post(AUTH_URL, headers=headers, data=data) as response:
-            response_text = await response.text()
-            print(f"Response Status: {response.status}")
             if response.status == 200:
                 result = await response.json()
-                print(f"Response: Success - Token obtained")
                 return result['access_token']
             else:
-                print(f"Response Error: {response_text}")
+                response_text = await response.text()
+                print(f"Error getting access token: {response.status} - {response_text}")
                 return None
 
 async def get_user_id_from_email(access_token, email):
@@ -135,19 +57,14 @@ async def get_user_id_from_email(access_token, email):
     headers = {"Authorization": f"Bearer {access_token}"}
     url = f"{BASE_URL}/users/{email}"
 
-    # Log request for Postman
-    log_api_request("GET", url, headers=headers)
-
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
-            response_text = await response.text()
-            print(f"Response Status: {response.status}")
             if response.status == 200:
                 data = await response.json()
-                print(f"Response: {json.dumps(data, indent=2)}")
                 return data.get('id')
             else:
-                print(f"Response Error: {response_text}")
+                response_text = await response.text()
+                print(f"Error getting user ID for {email}: {response.status} - {response_text}")
                 return None
 
 async def get_meetings_by_date_range(access_token, user_id, from_date, to_date):
@@ -163,56 +80,27 @@ async def get_meetings_by_date_range(access_token, user_id, from_date, to_date):
         "page_size": 300
     }
 
-    # Log request for Postman
-    log_api_request("GET", url, headers=headers, params=params)
-
     all_meetings = []
     next_page_token = None
-    page_num = 1
 
     async with aiohttp.ClientSession() as session:
         while True:
             if next_page_token:
                 params['next_page_token'] = next_page_token
-                print(f"\nFetching page {page_num} (with next_page_token)...")
 
             async with session.get(url, headers=headers, params=params) as response:
-                response_text = await response.text()
-                print(f"Response Status: {response.status}")
-                
                 if response.status == 200:
                     data = await response.json()
                     meetings = data.get('meetings', [])
-                    print(f"Found {len(meetings)} meetings on page {page_num}")
                     all_meetings.extend(meetings)
                     next_page_token = data.get('next_page_token')
                     if not next_page_token:
-                        print(f"Total meetings found: {len(all_meetings)}")
                         break
-                    page_num += 1
                 elif response.status == 404:
-                    print(f"Response: No meetings found for user {user_id} in date range {from_date} to {to_date}")
                     break
                 else:
-                    print(f"Response Error: {response_text}")
-                    # Check for scope/permission errors
-                    try:
-                        error_data = json.loads(response_text)
-                        if error_data.get('code') == 4711 or 'scope' in error_data.get('message', '').lower():
-                            print("\n" + "!"*80)
-                            print("PERMISSION ERROR: Missing required Zoom API scope!")
-                            print("!"*80)
-                            print("Required scope: report:read:user:admin")
-                            print("\nTo fix this:")
-                            print("1. Go to https://marketplace.zoom.us/")
-                            print("2. Navigate to 'Develop' > 'Build App' > Your App")
-                            print("3. Go to the 'Scopes' tab")
-                            print("4. Add the scope: 'View user meeting reports' (report:read:user:admin)")
-                            print("5. Save and re-authorize your app")
-                            print("6. Restart the bot service")
-                            print("!"*80 + "\n")
-                    except:
-                        pass
+                    response_text = await response.text()
+                    print(f"Error fetching meetings: {response.status} - {response_text}")
                     break
     
     return all_meetings
@@ -233,53 +121,24 @@ async def get_meeting_participants(access_token, meeting_uuid):
         "page_size": 300
     }
 
-    # Log request for Postman
-    log_api_request("GET", url, headers=headers, params=params)
-
     participants = []
     next_page_token = None
-    page_num = 1
 
     async with aiohttp.ClientSession() as session:
         while True:
             if next_page_token:
                 params['next_page_token'] = next_page_token
-                print(f"\nFetching participants page {page_num} (with next_page_token)...")
 
             async with session.get(url, headers=headers, params=params) as response:
-                response_text = await response.text()
-                print(f"Response Status: {response.status}")
-                
                 if response.status == 200:
                     data = await response.json()
-                    page_participants = data.get('participants', [])
-                    print(f"Found {len(page_participants)} participants on page {page_num}")
-                    participants.extend(page_participants)
+                    participants.extend(data.get('participants', []))
                     next_page_token = data.get('next_page_token')
                     if not next_page_token:
-                        print(f"Total participants found: {len(participants)}")
                         break
-                    page_num += 1
                 else:
-                    print(f"Response Error: {response_text}")
-                    # Check for scope/permission errors
-                    try:
-                        error_data = json.loads(response_text)
-                        if error_data.get('code') == 4711 or 'scope' in error_data.get('message', '').lower():
-                            print("\n" + "!"*80)
-                            print("PERMISSION ERROR: Missing required Zoom API scope!")
-                            print("!"*80)
-                            print("Required scope: report:read:user:admin")
-                            print("\nTo fix this:")
-                            print("1. Go to https://marketplace.zoom.us/")
-                            print("2. Navigate to 'Develop' > 'Build App' > Your App")
-                            print("3. Go to the 'Scopes' tab")
-                            print("4. Add the scope: 'View user meeting reports' (report:read:user:admin)")
-                            print("5. Save and re-authorize your app")
-                            print("6. Restart the bot service")
-                            print("!"*80 + "\n")
-                    except:
-                        pass
+                    response_text = await response.text()
+                    print(f"Error fetching participants for {meeting_uuid}: {response.status} - {response_text}")
                     break
     
     return participants
@@ -315,7 +174,6 @@ async def get_attendance_report(target_date_str=None):
     if not user_id:
         # Try using email directly as user_id (some Zoom accounts allow this)
         user_id = ZOOM_HOST_EMAIL
-        print(f"Could not get user ID, trying email directly: {user_id}")
 
     # Use the target date for both from and to (same day)
     date_from = target_date_str
@@ -352,8 +210,6 @@ async def get_attendance_report(target_date_str=None):
                 break
         
         if not batch_name:
-            # Debug: print unmatched meeting IDs
-            print(f"Unmatched meeting ID: {meeting_id_str} (normalized: {normalized_meeting_id})")
             continue
         
         # Parse start time to verify it matches the target date in IST
@@ -374,14 +230,12 @@ async def get_attendance_report(target_date_str=None):
             # Verify the date matches (in IST)
             if dt_ist.date() != target_date:
                 continue
-        except Exception as e:
-            print(f"Error parsing date {start_time_str}: {e}")
+        except Exception:
             continue
         
         # Get meeting UUID
         meeting_uuid = meeting.get('uuid')
         if not meeting_uuid:
-            print(f"Warning: No UUID found for meeting {meeting_id_str}")
             continue
         
         # Get participants
@@ -395,6 +249,7 @@ async def get_attendance_report(target_date_str=None):
                 unique_names.add(name)
         
         unique_names.discard("Apoorva Yoga")
+        unique_names.discard("S P Apoorva")
         
         if batch_name not in found_batches:
             found_batches[batch_name] = []
