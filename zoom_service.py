@@ -62,6 +62,8 @@ async def get_past_meetings(access_token, date_str):
         async with session.get(url, headers=headers, params=params) as response:
             if response.status == 200:
                 data = await response.json()
+                # Debugging: Print the raw data to console/logs
+                print(f"DEBUG: Fetched meetings for {date_str}: {data}")
                 return data.get('meetings', [])
             else:
                 error_text = await response.text()
@@ -109,52 +111,69 @@ async def get_attendance_report():
         return "Failed to authenticate with Zoom."
 
     today = datetime.now().strftime('%Y-%m-%d')
-    meetings = await get_past_meetings(token, today)
-
-    if not meetings:
-        return f"No meetings found for today ({today})."
-
-    report_lines = []
-    batches = ["Batch 1", "Batch 2", "Batch 3", "Batch 4"]
+    # Try fetching for yesterday and today to handle timezone differences
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
-    # Filter meetings that contain "Batch" in the topic
-    # And specifically match the requested batches
+    # Fetch both and combine
+    meetings_today = await get_past_meetings(token, today)
+    meetings_yesterday = await get_past_meetings(token, yesterday)
+    
+    meetings = meetings_today + meetings_yesterday
+    
+    
+    if not meetings:
+        return f"No meetings found for today ({today}) or yesterday ({yesterday}). Debug info: Checked email {ZOOM_HOST_EMAIL}"
+
+    # Map of Batch Name to Meeting ID (stripped of spaces)
+    BATCH_IDS = {
+        "83527645001": "Batch 1",
+        "88002278840": "Batch 2",
+        "81387781923": "Batch 3",
+        "88554007453": "Batch 4"
+    }
     
     found_batches = {}
 
     for meeting in meetings:
         topic = meeting.get('topic', '')
-        meeting_id = meeting.get('id')
-        start_time = meeting.get('start_time') # e.g., 2025-11-23T10:50:26Z
+        meeting_id = str(meeting.get('id')) # Ensure it's a string
+        start_time = meeting.get('start_time')
         
-        # Simple check if any batch keyword is in the topic
-        matched_batch = None
-        for batch in batches:
-            if batch.lower() in topic.lower():
-                matched_batch = batch
-                break
+        # Check if meeting_id matches one of our batches
+        matched_batch = BATCH_IDS.get(meeting_id)
+        
+        # Fallback to topic matching if ID doesn't match (just in case)
+        if not matched_batch:
+             for batch_name in ["Batch 1", "Batch 2", "Batch 3", "Batch 4"]:
+                if batch_name.lower() in topic.lower():
+                    matched_batch = batch_name
+                    break
         
         if matched_batch:
             if matched_batch not in found_batches:
                 found_batches[matched_batch] = []
             
-            participants = await get_meeting_participants(token, meeting_id)
+            # Use the UUID for fetching participants if available, otherwise ID
+            # The API for participants usually takes the UUID for past meetings to be precise, 
+            # or the meetingId (which might return the latest if not careful, but here we are iterating past meetings)
+            # Actually, for /report/meetings/{meetingId}/participants, meetingId can be the number or UUID.
+            # Using UUID is safer for past meetings.
+            meeting_uuid = meeting.get('uuid')
+            
+            # If uuid starts with /, it needs to be double encoded, but usually it's fine.
+            # Let's try using the numeric ID first as it's simpler, or UUID if ID fails? 
+            # The previous code used meeting_id (numeric). Let's stick to that but maybe try UUID if needed.
+            # Actually, for past meetings, using the UUID is recommended.
+            
+            participants = await get_meeting_participants(token, meeting_uuid if meeting_uuid else meeting_id)
             
             # Deduplicate by name
             unique_names = set()
             for p in participants:
                 name = p.get('name')
-                # Filter out the host if needed, user said "ignore the host name"
-                # We can try to filter by email if available, or just name
-                # Assuming host name is "Apoorva Yoga" or similar from screenshot
-                # But user said "unique participant name as student name"
                 if name:
                     unique_names.add(name)
             
-            # Remove host name if known, or just leave it. User said "ignore the host name in the report"
-            # which implies I don't need to explicitly filter it out from the list, just not highlight it?
-            # Or maybe they mean "don't include the host in the list".
-            # I'll try to remove "Apoorva Yoga" if present, just in case.
             unique_names.discard("Apoorva Yoga") 
             
             found_batches[matched_batch].append({
