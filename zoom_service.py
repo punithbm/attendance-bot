@@ -2,6 +2,7 @@ import os
 import aiohttp
 import base64
 import json
+import html
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from urllib.parse import quote, urlencode
@@ -23,6 +24,32 @@ BATCH_IDS = {
     "Batch 3": "81387781923",
     "Batch 4": "88554007453"
 }
+
+def escape_markdown_v2(text):
+    """
+    Escape special characters for Telegram MarkdownV2 format.
+    """
+    if not text:
+        return text
+    # Characters that need escaping in MarkdownV2
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    escaped = str(text)
+    for char in special_chars:
+        escaped = escaped.replace(char, f'\\{char}')
+    return escaped
+
+def escape_markdown(text):
+    """
+    Escape special characters for Telegram Markdown format (simpler version).
+    """
+    if not text:
+        return text
+    # Characters that need escaping in Markdown
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    escaped = str(text)
+    for char in special_chars:
+        escaped = escaped.replace(char, f'\\{char}')
+    return escaped
 
 def log_api_request(method, url, headers=None, params=None, data=None, body=None):
     """
@@ -384,11 +411,12 @@ async def get_attendance_report(target_date_str=None):
     # Sort batches for consistent output
     sorted_batches = sorted(BATCH_IDS.keys())
     
-    final_message = f"**Attendance Report for {target_date_str}**\n\n"
+    # Use HTML format which is more forgiving with special characters
+    final_message = f"<b>Attendance Report for {target_date_str}</b>\n\n"
     
     for batch in sorted_batches:
         if batch in found_batches:
-            final_message += f"**{batch}**\n"
+            final_message += f"<b>{batch}</b>\n"
             for meeting in found_batches[batch]:
                 # Parse start time for better display
                 try:
@@ -402,10 +430,15 @@ async def get_attendance_report(target_date_str=None):
                 except:
                     time_str = meeting['start_time']
 
-                final_message += f"_Time: {time_str}_\n"
+                # Escape HTML special characters in time and names
+                time_str_escaped = html.escape(time_str) if time_str else ""
+                final_message += f"<i>Time: {time_str_escaped}</i>\n"
+                
                 if meeting['participants']:
                     for name in meeting['participants']:
-                        final_message += f"- {name}\n"
+                        # Escape HTML special characters in participant names
+                        escaped_name = html.escape(name) if name else ""
+                        final_message += f"• {escaped_name}\n"
                 else:
                     final_message += "No participants found.\n"
             final_message += "\n"

@@ -176,9 +176,9 @@ async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Split message if it's too long (Telegram limit is 4096 chars)
         if len(report) > 4000:
             for x in range(0, len(report), 4000):
-                await update.message.reply_text(report[x:x+4000], parse_mode=ParseMode.MARKDOWN)
+                await update.message.reply_text(report[x:x+4000], parse_mode=ParseMode.HTML)
         else:
-            await update.message.reply_text(report, parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(report, parse_mode=ParseMode.HTML)
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {str(e)}")
 
