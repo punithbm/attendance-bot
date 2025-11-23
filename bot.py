@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotComm
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters, CallbackContext
 from database import fetch_user_details, fetch_unpaid_users, update_payment_status, update_followup_date, get_batch_id_for_user, update_pack_payment, mark_user_inactive
+from zoom_service import get_attendance_report
 from datetime import datetime
 from urllib.parse import quote
 
@@ -30,7 +31,8 @@ async def setup_commands(application: Application):
         BotCommand("start", "Start the bot"),
         BotCommand("unpaid", "View unpaid users"),
         BotCommand("paid", "View paid users"),
-        BotCommand("userdetails", "Get user details by phone number or name")
+        BotCommand("userdetails", "Get user details by phone number or name"),
+        BotCommand("attendance", "Get today's attendance from Zoom")
     ]
     await application.bot.set_my_commands(commands)
 
@@ -40,7 +42,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'Hello! Here are the available commands:\n'
         '/unpaid - View unpaid users\n'
-        '/userdetails - Get user details by phone number or name'
+        '/userdetails - Get user details by phone number or name\n'
+        '/attendance - Get attendance report from Zoom'
     )
 
 async def unpaid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -148,6 +151,25 @@ async def get_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
+async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetch and display attendance report."""
+    if not await check_user(update):
+        return
+
+    await update.message.reply_text("Fetching attendance data from Zoom... This may take a moment.")
+    
+    try:
+        report = await get_attendance_report()
+        # Split message if it's too long (Telegram limit is 4096 chars)
+        if len(report) > 4000:
+            for x in range(0, len(report), 4000):
+                await update.message.reply_text(report[x:x+4000], parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.message.reply_text(report, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {str(e)}")
+
+
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     # Define the conversation handler
@@ -163,6 +185,7 @@ def main():
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('unpaid', unpaid))
     application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(CommandHandler('attendance', attendance))
     application.add_handler(user_details_conv_handler)
 
     application.run_polling()
