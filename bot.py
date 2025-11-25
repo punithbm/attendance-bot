@@ -247,6 +247,12 @@ async def setup_scheduler(application: Application):
     This is called after the application is initialized.
     """
     job_queue = application.job_queue
+
+    class SchedulerContext:
+        def __init__(self, bot):
+            self.bot = bot
+
+    scheduler_context = SchedulerContext(application.bot)
     
     if job_queue is None:
         print("ERROR: JobQueue is not initialized!")
@@ -264,7 +270,8 @@ async def setup_scheduler(application: Application):
             ),
             id='weekly_attendance_report',
             name='Send attendance report to group',
-            replace_existing=True
+            replace_existing=True,
+            kwargs={'context': scheduler_context}
         )
         print("Scheduler started: Attendance reports will be sent Mon/Wed/Fri at 9:30 PM IST")
         print(f"Next run time: {job_queue.scheduler.get_job('weekly_attendance_report').next_run_time}")
