@@ -7,7 +7,7 @@ from database import fetch_user_details, fetch_unpaid_users, update_payment_stat
 from zoom_service import get_attendance_report
 from datetime import datetime
 from urllib.parse import quote
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from telegram.ext import JobQueue
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 
@@ -36,7 +36,8 @@ async def setup_commands(application: Application):
         BotCommand("unpaid", "View unpaid users"),
         BotCommand("paid", "View paid users"),
         BotCommand("userdetails", "Get user details by phone number or name"),
-        BotCommand("attendance", "Get today's attendance from Zoom")
+        BotCommand("attendance", "Get today's attendance from Zoom"),
+        BotCommand("testschedule", "Test scheduled attendance report (sends to group)")
     ]
     await application.bot.set_my_commands(commands)
 
@@ -155,30 +156,29 @@ async def get_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
-async def send_attendance_report(application: Application, chat_id: str, target_date: str = None):
+async def send_attendance_report(context: ContextTypes.DEFAULT_TYPE):
     """
-    Send attendance report to a specific chat (group or user).
-    This function can be called manually or by scheduler.
+    Send attendance report to the group.
+    This function is called by the scheduler.
     """
     try:
-        if target_date is None:
-            # Use IST timezone to match scheduler configuration
-            ist = pytz.timezone('Asia/Kolkata')
-            target_date = datetime.now(ist).strftime('%Y-%m-%d')
+        # Use IST timezone to match scheduler configuration
+        ist = pytz.timezone('Asia/Kolkata')
+        target_date = datetime.now(ist).strftime('%Y-%m-%d')
         
         report = await get_attendance_report(target_date)
         
         # Split message if it's too long (Telegram limit is 4096 chars)
         if len(report) > 4000:
             for x in range(0, len(report), 4000):
-                await application.bot.send_message(
-                    chat_id=chat_id,
+                await context.bot.send_message(
+                    chat_id=GROUP_CHAT_ID,
                     text=report[x:x+4000],
                     parse_mode=ParseMode.HTML
                 )
         else:
-            await application.bot.send_message(
-                chat_id=chat_id,
+            await context.bot.send_message(
+                chat_id=GROUP_CHAT_ID,
                 text=report,
                 parse_mode=ParseMode.HTML
             )
@@ -186,8 +186,8 @@ async def send_attendance_report(application: Application, chat_id: str, target_
         error_msg = f"An error occurred while sending attendance report: {str(e)}"
         print(error_msg)
         try:
-            await application.bot.send_message(
-                chat_id=chat_id,
+            await context.bot.send_message(
+                chat_id=GROUP_CHAT_ID,
                 text=error_msg
             )
         except:
@@ -224,32 +224,54 @@ async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {str(e)}")
 
+async def test_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test the scheduled attendance report by sending it immediately to the group."""
+    if not await check_user(update):
+        return
+    
+    await update.message.reply_text("Testing scheduled attendance report... Sending to group now.")
+    
+    # Create a mock context for the send_attendance_report function
+    class MockContext:
+        def __init__(self, bot):
+            self.bot = bot
+    
+    mock_context = MockContext(context.bot)
+    await send_attendance_report(mock_context)
+    await update.message.reply_text("Test completed! Check the group for the attendance report.")
 
-def setup_scheduler(application: Application):
+async def setup_scheduler(application: Application):
     """
     Set up scheduled tasks for sending attendance reports.
     Runs every Monday, Wednesday, and Friday at 9:30 PM IST.
+    This is called after the application is initialized.
     """
-    scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
+    job_queue = application.job_queue
     
-    # Schedule attendance report for Mon, Wed, Fri at 9:30 PM IST
-    scheduler.add_job(
-        send_attendance_report,
-        trigger=CronTrigger(
-            day_of_week='mon,wed,fri',  # Monday, Wednesday, Friday
-            hour=21,  # 9 PM
-            minute=30,  # 30 minutes
-            timezone=pytz.timezone('Asia/Kolkata')  # IST timezone
-        ),
-        args=[application, GROUP_CHAT_ID],
-        id='weekly_attendance_report',
-        name='Send attendance report to group',
-        replace_existing=True
-    )
+    if job_queue is None:
+        print("ERROR: JobQueue is not initialized!")
+        return
     
-    scheduler.start()
-    print("Scheduler started: Attendance reports will be sent Mon/Wed/Fri at 9:30 PM IST")
-    return scheduler
+    # Use the underlying scheduler to add a cron job
+    try:
+        job_queue.scheduler.add_job(
+            send_attendance_report,
+            trigger=CronTrigger(
+                day_of_week='mon,wed,fri',  # Monday, Wednesday, Friday
+                hour=21,  # 9 PM
+                minute=30,  # 30 minutes
+                timezone=pytz.timezone('Asia/Kolkata')  # IST timezone
+            ),
+            id='weekly_attendance_report',
+            name='Send attendance report to group',
+            replace_existing=True
+        )
+        print("Scheduler started: Attendance reports will be sent Mon/Wed/Fri at 9:30 PM IST")
+        print(f"Next run time: {job_queue.scheduler.get_job('weekly_attendance_report').next_run_time}")
+    except Exception as e:
+        print(f"ERROR setting up scheduler: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -268,17 +290,15 @@ def main():
     application.add_handler(CommandHandler('unpaid', unpaid))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(CommandHandler('attendance', attendance))
+    application.add_handler(CommandHandler('testschedule', test_schedule))
     application.add_handler(user_details_conv_handler)
 
-    # Set up scheduler for automatic attendance reports
-    scheduler = setup_scheduler(application)
+    # Set up scheduler for automatic attendance reports after initialization
+    application.post_init(setup_scheduler)
     
     # Start the bot
     print("Bot is starting...")
     application.run_polling()
-    
-    # Shutdown scheduler when bot stops
-    scheduler.shutdown()
 
 if __name__ == '__main__':
     main()
