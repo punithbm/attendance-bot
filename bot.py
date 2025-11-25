@@ -274,7 +274,12 @@ async def setup_scheduler(application: Application):
         traceback.print_exc()
 
 def main():
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(setup_scheduler)
+        .build()
+    )
     
     # Define the conversation handler
     user_details_conv_handler = ConversationHandler(
@@ -293,9 +298,6 @@ def main():
     application.add_handler(CommandHandler('testschedule', test_schedule))
     application.add_handler(user_details_conv_handler)
 
-    # Set up scheduler for automatic attendance reports after initialization
-    application.post_init(setup_scheduler)
-    
     # Start the bot
     print("Bot is starting...")
     application.run_polling()
