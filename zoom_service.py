@@ -313,10 +313,10 @@ async def get_attendance_report(target_date_str=None):
                 final_message += f"<i>Time: {time_str_escaped}</i>\n"
                 
                 if meeting['participants']:
-                    for name in meeting['participants']:
+                    for i, name in enumerate(meeting['participants'], 1):
                         # Escape HTML special characters in participant names
                         escaped_name = html.escape(name) if name else ""
-                        final_message += f"• {escaped_name}\n"
+                        final_message += f"{i}. {escaped_name}\n"
                 else:
                     final_message += "No participants found.\n"
             final_message += "\n"
