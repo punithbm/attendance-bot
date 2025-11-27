@@ -269,8 +269,14 @@ async def get_attendance_report(target_date_str=None):
                 continue
             raw_duration = p.get('duration') or p.get('total_duration')
             try:
-                duration = int(raw_duration)
+                duration_seconds = int(raw_duration)
             except (TypeError, ValueError):
+                duration_seconds = 0
+            
+            # Convert seconds to minutes (rounded, min 1 minute if duration > 0)
+            if duration_seconds > 0:
+                duration = max(1, round(duration_seconds / 60))
+            else:
                 duration = 0
             
             existing_duration = participant_durations.get(name, 0)
@@ -328,7 +334,7 @@ async def get_attendance_report(target_date_str=None):
                     for i, participant in enumerate(meeting['participants'], 1):
                         escaped_name = html.escape(participant.get('name', "")) if participant.get('name') else ""
                         duration = participant.get('duration', 0)
-                        final_message += f"{i}. {escaped_name}  --  {duration} mins\n"
+                        final_message += f"{i}. {escaped_name}  -  {duration} mins\n"
                 else:
                     final_message += "No participants found.\n"
             final_message += "\n"

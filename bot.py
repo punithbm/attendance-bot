@@ -260,7 +260,7 @@ async def setup_scheduler(application: Application):
     
     # Use the underlying scheduler to add a cron job
     try:
-        job_queue.scheduler.add_job(
+        job = job_queue.scheduler.add_job(
             send_attendance_report,
             trigger=CronTrigger(
                 day_of_week='mon,wed,fri',  # Monday, Wednesday, Friday
@@ -273,8 +273,10 @@ async def setup_scheduler(application: Application):
             replace_existing=True,
             kwargs={'context': scheduler_context}
         )
+        next_run = getattr(job, "next_run_time", None)
         print("Scheduler started: Attendance reports will be sent Mon/Wed/Fri at 9:30 PM IST")
-        print(f"Next run time: {job_queue.scheduler.get_job('weekly_attendance_report').next_run_time}")
+        if next_run:
+            print(f"Next run time: {next_run}")
     except Exception as e:
         print(f"ERROR setting up scheduler: {str(e)}")
         import traceback
