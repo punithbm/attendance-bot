@@ -261,15 +261,24 @@ async def get_attendance_report(target_date_str=None):
         # Get participants
         participants = await get_meeting_participants(token, meeting_uuid)
         
-        # Deduplicate by name
-        unique_names = set()
+        # Deduplicate by name while keeping max duration (in minutes)
+        participant_durations = {}
         for p in participants:
             name = p.get('name')
-            if name:
-                unique_names.add(name)
+            if not name:
+                continue
+            raw_duration = p.get('duration') or p.get('total_duration')
+            try:
+                duration = int(raw_duration)
+            except (TypeError, ValueError):
+                duration = 0
+            
+            existing_duration = participant_durations.get(name, 0)
+            if duration > existing_duration:
+                participant_durations[name] = duration
         
-        unique_names.discard("Apoorva Yoga")
-        unique_names.discard("S P Apoorva")
+        participant_durations.pop("Apoorva Yoga", None)
+        participant_durations.pop("S P Apoorva", None)
         
         if batch_name not in found_batches:
             found_batches[batch_name] = []
@@ -277,7 +286,10 @@ async def get_attendance_report(target_date_str=None):
         found_batches[batch_name].append({
             "topic": batch_name,
             "start_time": start_time_str,
-            "participants": sorted(list(unique_names))
+            "participants": [
+                {"name": name, "duration": participant_durations[name]}
+                for name in sorted(participant_durations.keys())
+            ]
         })
 
     if not found_batches:
@@ -313,10 +325,10 @@ async def get_attendance_report(target_date_str=None):
                 final_message += f"<i>Time: {time_str_escaped}</i>\n"
                 
                 if meeting['participants']:
-                    for i, name in enumerate(meeting['participants'], 1):
-                        # Escape HTML special characters in participant names
-                        escaped_name = html.escape(name) if name else ""
-                        final_message += f"{i}. {escaped_name}\n"
+                    for i, participant in enumerate(meeting['participants'], 1):
+                        escaped_name = html.escape(participant.get('name', "")) if participant.get('name') else ""
+                        duration = participant.get('duration', 0)
+                        final_message += f"{i}. {escaped_name}  --  {duration} mins\n"
                 else:
                     final_message += "No participants found.\n"
             final_message += "\n"
