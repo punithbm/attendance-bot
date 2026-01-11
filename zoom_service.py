@@ -38,11 +38,15 @@ BASE_URL = "https://api.zoom.us/v2"
 AUTH_URL = "https://zoom.us/oauth/token"
 
 # Map of Batch Name to Meeting ID (stripped of spaces)
+# Batch 1: 06:00 AM - 07:15 AM IST - Yoga with Apoorva
+# Batch 2: 07:30 AM - 08:45 AM IST - Yoga with Apoorva
+# Batch 3: 11:00 AM - 12:30 PM IST - Yoga with Apoorva
+# Batch 4: 06:45 PM - 08:30 PM IST - Yoga with Apoorva
 BATCH_IDS = {
-    "Batch 1": "83527645001",
-    "Batch 2": "88002278840",
-    "Batch 3": "81387781923",
-    "Batch 4": "88554007453"
+    "Batch 1": "86094949374",
+    "Batch 2": "89439860664",
+    "Batch 3": "86397905588",
+    "Batch 4": "81296495600"
 }
 
 
