@@ -21,7 +21,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 AUTHORIZED_USERS = os.getenv('AUTHORIZED_USERS')
 AUTHORIZED_USERNAMES_LIST = AUTHORIZED_USERS.split(',') if AUTHORIZED_USERS else []
-GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '4696944070')  # Default to the provided group ID
+GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID', '-1004696944070')  # Default to the provided group ID (must include -100 prefix for supergroups)
 
 async def check_user(update: Update) -> bool:
     user_username = update.message.from_user.username
@@ -156,18 +156,19 @@ async def get_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
-async def send_attendance_report(context: ContextTypes.DEFAULT_TYPE):
+async def send_attendance_report(context: ContextTypes.DEFAULT_TYPE, batch_name: str = None):
     """
     Send attendance report to the group.
     This function is called by the scheduler.
+    If batch_name is provided, the report is limited to that batch.
     """
     try:
         # Use IST timezone to match scheduler configuration
         ist = pytz.timezone('Asia/Kolkata')
         target_date = datetime.now(ist).strftime('%Y-%m-%d')
-        
-        report = await get_attendance_report(target_date)
-        
+
+        report = await get_attendance_report(target_date, batch_filter=batch_name)
+
         # Split message if it's too long (Telegram limit is 4096 chars)
         if len(report) > 4000:
             for x in range(0, len(report), 4000):
@@ -225,19 +226,32 @@ async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"An error occurred: {str(e)}")
 
 async def test_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Test the scheduled attendance report by sending it immediately to the group."""
+    """Test the scheduled attendance report by sending it immediately to the group.
+    Usage: /testschedule        -> sends full-day report
+           /testschedule 1..4   -> sends only that batch's report
+    """
     if not await check_user(update):
         return
-    
-    await update.message.reply_text("Testing scheduled attendance report... Sending to group now.")
-    
+
+    batch_name = None
+    if context.args:
+        arg = context.args[0].strip()
+        if arg in {"1", "2", "3", "4"}:
+            batch_name = f"Batch {arg}"
+        else:
+            await update.message.reply_text("Invalid argument. Use /testschedule [1|2|3|4].")
+            return
+
+    label = batch_name if batch_name else "full day"
+    await update.message.reply_text(f"Testing scheduled attendance report ({label})... Sending to group now.")
+
     # Create a mock context for the send_attendance_report function
     class MockContext:
         def __init__(self, bot):
             self.bot = bot
-    
+
     mock_context = MockContext(context.bot)
-    await send_attendance_report(mock_context)
+    await send_attendance_report(mock_context, batch_name=batch_name)
     await update.message.reply_text("Test completed! Check the group for the attendance report.")
 
 async def setup_scheduler(application: Application):
@@ -253,20 +267,19 @@ async def setup_scheduler(application: Application):
             self.bot = bot
 
     scheduler_context = SchedulerContext(application.bot)
-    
+
     if job_queue is None:
         print("ERROR: JobQueue is not initialized!")
         return
-    
-    # Use the underlying scheduler to add a cron job
+
     try:
         job = job_queue.scheduler.add_job(
             send_attendance_report,
             trigger=CronTrigger(
-                day_of_week='mon,wed,fri',  # Monday, Wednesday, Friday
-                hour=21,  # 9 PM
-                minute=30,  # 30 minutes
-                timezone=pytz.timezone('Asia/Kolkata')  # IST timezone
+                day_of_week='mon,wed,fri',
+                hour=21,
+                minute=30,
+                timezone=pytz.timezone('Asia/Kolkata')
             ),
             id='weekly_attendance_report',
             name='Send attendance report to group',

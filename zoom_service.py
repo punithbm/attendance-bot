@@ -167,10 +167,11 @@ async def get_meeting_participants(access_token, meeting_uuid):
     
     return participants
 
-async def get_attendance_report(target_date_str=None):
+async def get_attendance_report(target_date_str=None, batch_filter=None):
     """
     Orchestrate fetching and formatting the attendance report.
     target_date_str: 'YYYY-MM-DD' format. If None, defaults to today.
+    batch_filter: Optional batch name (e.g. "Batch 1") to limit the report to a single batch.
     """
     token = await get_zoom_access_token()
     if not token:
@@ -212,6 +213,8 @@ async def get_attendance_report(target_date_str=None):
     # Create reverse lookup: meeting ID (without spaces) -> batch name
     batch_lookup = {}
     for batch_name, meeting_id in BATCH_IDS.items():
+        if batch_filter and batch_name != batch_filter:
+            continue
         # Normalize meeting ID (remove spaces for comparison)
         normalized_id = meeting_id.replace(' ', '')
         batch_lookup[normalized_id] = batch_name
@@ -303,10 +306,15 @@ async def get_attendance_report(target_date_str=None):
         })
 
     if not found_batches:
+        if batch_filter:
+            return f"No meeting found for {batch_filter} on {target_date_str}."
         return f"No Batch meetings found for {target_date_str}.\n\nFound {len(meetings)} meeting(s) on this date, but none matched the configured batch meeting IDs."
 
-    # Sort batches for consistent output
-    sorted_batches = sorted(BATCH_IDS.keys())
+    # Sort batches for consistent output (filter to requested batch if specified)
+    if batch_filter:
+        sorted_batches = [batch_filter]
+    else:
+        sorted_batches = sorted(BATCH_IDS.keys())
     
     # Format date with ordinal (e.g., "23rd Nov 2025")
     formatted_date = format_date_with_ordinal(target_date_str)
