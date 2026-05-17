@@ -189,7 +189,7 @@ async def get_attendance_report(target_date_str=None, batch_filter=None):
     # Validate that the date is not in the future
     today = datetime.now().date()
     if target_date > today:
-        return f"Date {target_date_str} is in the future. Please provide a past date or today's date."
+        return f"Date {format_date_with_ordinal(target_date_str)} is in the future. Please provide a past date or today's date."
 
     # Get user ID from email
     if not ZOOM_HOST_EMAIL:
@@ -208,7 +208,7 @@ async def get_attendance_report(target_date_str=None, batch_filter=None):
     meetings = await get_meetings_by_date_range(token, user_id, date_from, date_to)
     
     if not meetings:
-        return f"No meetings found for {target_date_str}.\n\nPossible reasons:\n- No meetings occurred on this date\n- API permissions may be insufficient\n- User ID/email may be incorrect"
+        return f"No meetings found for {format_date_with_ordinal(target_date_str)}."
 
     # Create reverse lookup: meeting ID (without spaces) -> batch name
     batch_lookup = {}
@@ -306,9 +306,10 @@ async def get_attendance_report(target_date_str=None, batch_filter=None):
         })
 
     if not found_batches:
+        formatted = format_date_with_ordinal(target_date_str)
         if batch_filter:
-            return f"No meeting found for {batch_filter} on {target_date_str}."
-        return f"No Batch meetings found for {target_date_str}.\n\nFound {len(meetings)} meeting(s) on this date, but none matched the configured batch meeting IDs."
+            return f"No meeting found for {batch_filter} on {formatted}."
+        return f"No meetings found for {formatted}."
 
     # Sort batches for consistent output (filter to requested batch if specified)
     if batch_filter:

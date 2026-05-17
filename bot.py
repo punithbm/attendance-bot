@@ -4,7 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotComm
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters, CallbackContext
 from database import fetch_user_details, fetch_unpaid_users, update_payment_status, update_followup_date, get_batch_id_for_user, update_pack_payment, mark_user_inactive
-from zoom_service import get_attendance_report
+from zoom_service import get_attendance_report, format_date_with_ordinal
 from datetime import datetime
 from urllib.parse import quote
 from telegram.ext import JobQueue
@@ -212,7 +212,8 @@ async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Invalid date format. Please use dd-mm-yyyy (e.g., 23-11-2025).")
             return
 
-    await update.message.reply_text(f"Fetching attendance data from Zoom for {'today' if not target_date else target_date}... This may take a moment.")
+    display_date = 'today' if not target_date else format_date_with_ordinal(target_date)
+    await update.message.reply_text(f"Fetching attendance data from Zoom for {display_date}... This may take a moment.")
     
     try:
         report = await get_attendance_report(target_date)
