@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.constants import ParseMode
@@ -194,22 +195,66 @@ async def send_attendance_report(context: ContextTypes.DEFAULT_TYPE, batch_name:
         except:
             pass
 
+def parse_user_date(text: str):
+    """
+    Parse flexible user date input into 'YYYY-MM-DD'. Returns None if unparseable.
+    Accepts: 15-05-2026, 15/05/2026, 2026-05-17, 15 may, 15th May,
+             15 may 2026, May 15, etc. When the year is omitted, picks
+             the most recent occurrence (this year, or last year if that
+             date is still in the future).
+    """
+    if not text:
+        return None
+    cleaned = text.strip().lower()
+    cleaned = re.sub(r'(\d+)(st|nd|rd|th)\b', r'\1', cleaned)
+    cleaned = cleaned.replace(',', ' ')
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    formats_with_year = [
+        "%d-%m-%Y", "%d/%m/%Y", "%d %m %Y",
+        "%Y-%m-%d", "%Y/%m/%d",
+        "%d %b %Y", "%d %B %Y",
+        "%b %d %Y", "%B %d %Y",
+    ]
+    for fmt in formats_with_year:
+        try:
+            return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    today = datetime.now().date()
+    formats_without_year = ["%d %b", "%d %B", "%b %d", "%B %d"]
+    for fmt in formats_without_year:
+        try:
+            dt = datetime.strptime(cleaned, fmt).replace(year=today.year).date()
+            if dt > today:
+                dt = dt.replace(year=today.year - 1)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    return None
+
+
 async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch and display attendance report. Usage: /attendance [dd-mm-yyyy]"""
+    """Fetch and display attendance report.
+    Usage: /attendance [date]
+    Date examples: 15-05-2026, 15/05/2026, 15 may, 15th May, May 15, 2026-05-17.
+    """
     if not await check_user(update):
         return
 
-    # Check for date argument
     target_date = None
     if context.args:
-        date_input = context.args[0]
-        try:
-            # Parse dd-mm-yyyy
-            dt = datetime.strptime(date_input, "%d-%m-%Y")
-            # Convert to YYYY-MM-DD for the service
-            target_date = dt.strftime("%Y-%m-%d")
-        except ValueError:
-            await update.message.reply_text("Invalid date format. Please use dd-mm-yyyy (e.g., 23-11-2025).")
+        date_input = ' '.join(context.args)
+        target_date = parse_user_date(date_input)
+        if not target_date:
+            await update.message.reply_text(
+                "Invalid date format. Try one of:\n"
+                "• 15-05-2026\n"
+                "• 15 May 2026\n"
+                "• 15th May (defaults to most recent)"
+            )
             return
 
     display_date = 'today' if not target_date else format_date_with_ordinal(target_date)
