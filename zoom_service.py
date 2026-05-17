@@ -325,7 +325,8 @@ async def get_attendance_report(target_date_str=None, batch_filter=None):
     
     for batch in sorted_batches:
         if batch in found_batches:
-            final_message += f"<b>{batch}</b>\n"
+            total_members = sum(len(m['participants']) for m in found_batches[batch])
+            final_message += f"<b>{batch} — {total_members} members</b>\n"
             for meeting in found_batches[batch]:
                 # Parse start time for better display
                 try:
