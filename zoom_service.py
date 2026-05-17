@@ -129,6 +129,37 @@ async def get_meetings_by_date_range(access_token, user_id, from_date, to_date):
     
     return all_meetings
 
+async def get_meeting_recording(access_token, meeting_uuid):
+    """
+    Fetch cloud recording info for a meeting instance UUID.
+    Returns {'share_url': ..., 'password': ...} if a recording exists, else None.
+    Requires the Zoom app scope `cloud_recording:read:admin` — silently returns
+    None on 401/403/404 so callers can degrade gracefully.
+    """
+    headers = {"Authorization": f"Bearer {access_token}"}
+    original_uuid = meeting_uuid
+    if meeting_uuid.startswith('/') or '//' in meeting_uuid:
+        meeting_uuid = quote(quote(meeting_uuid, safe=''), safe='')
+
+    url = f"{BASE_URL}/meetings/{meeting_uuid}/recordings"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                if not data.get('recording_files'):
+                    return None
+                return {
+                    'share_url': data.get('share_url'),
+                    'password': data.get('password') or data.get('recording_play_passcode'),
+                }
+            if response.status in (401, 403, 404):
+                return None
+            response_text = await response.text()
+            print(f"Error fetching recording for {original_uuid}: {response.status} - {response_text}")
+            return None
+
+
 async def get_meeting_participants(access_token, meeting_uuid):
     """
     Fetch participants for a specific meeting instance UUID.
@@ -267,6 +298,9 @@ async def get_attendance_report(target_date_str=None, batch_filter=None):
         
         # Get participants
         participants = await get_meeting_participants(token, meeting_uuid)
+
+        # Try to fetch cloud recording (None if not recorded or scope missing)
+        recording = await get_meeting_recording(token, meeting_uuid)
         
         # Deduplicate by name while keeping max duration (in minutes)
         participant_durations = {}
@@ -299,6 +333,7 @@ async def get_attendance_report(target_date_str=None, batch_filter=None):
         found_batches[batch_name].append({
             "topic": batch_name,
             "start_time": start_time_str,
+            "recording": recording,
             "participants": [
                 {"name": name, "duration": participant_durations[name]}
                 for name in sorted(participant_durations.keys())
@@ -343,7 +378,15 @@ async def get_attendance_report(target_date_str=None, batch_filter=None):
                 # Escape HTML special characters in time and names
                 time_str_escaped = html.escape(time_str) if time_str else ""
                 final_message += f"<i>Time: {time_str_escaped}</i>\n"
-                
+
+                recording = meeting.get('recording')
+                if recording and recording.get('share_url'):
+                    share_url = html.escape(recording['share_url'], quote=True)
+                    final_message += f"<a href=\"{share_url}\">Recording</a>"
+                    if recording.get('password'):
+                        final_message += f" (passcode: {html.escape(recording['password'])})"
+                    final_message += "\n"
+
                 if meeting['participants']:
                     for i, participant in enumerate(meeting['participants'], 1):
                         escaped_name = html.escape(participant.get('name', "")) if participant.get('name') else ""
