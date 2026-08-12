@@ -53,6 +53,7 @@ async def setup_commands(application: Application):
         BotCommand("renewals", "Who is due/overdue for renewal (/renewals all for full list)"),
         BotCommand("userdetails", "Get user details by phone number or name"),
         BotCommand("attendance", "Get today's attendance from Zoom"),
+        BotCommand("recording", "Get recording links for today or a date (e.g. /recording 15 may)"),
         BotCommand("summary", "Monthly attendance summary + CSV (e.g. /summary jun jul)"),
         BotCommand("setalias", "Map a Zoom name to a student (e.g. /setalias iPhone = Rashmi)"),
         BotCommand("testschedule", "Test scheduled attendance report (sends to group)")
@@ -307,6 +308,46 @@ async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(rec_msg, parse_mode=ParseMode.HTML)
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {str(e)}")
+
+
+async def recording(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetch class recording links only (no attendance list).
+    Usage: /recording [date]
+    Date examples: 15-05-2026, 15/05/2026, 15 may, 15th May, May 15, 2026-05-17.
+    """
+    if not await check_user(update):
+        return
+
+    target_date = None
+    if context.args:
+        date_input = ' '.join(context.args)
+        target_date = parse_user_date(date_input)
+        if not target_date:
+            await update.message.reply_text(
+                "Invalid date format. Try one of:\n"
+                "• 15-05-2026\n"
+                "• 15 May 2026\n"
+                "• 15th May (defaults to most recent)"
+            )
+            return
+
+    display_date = 'today' if not target_date else format_date_with_ordinal(target_date)
+    await update.message.reply_text(f"Fetching recordings from Zoom for {display_date}... This may take a moment.")
+
+    try:
+        result = await get_attendance_report(target_date)
+        recordings = result["recordings"]
+        if not recordings:
+            await update.message.reply_text(
+                f"No recordings found for {display_date}. "
+                "Zoom may still be processing them, or the classes weren't cloud-recorded."
+            )
+            return
+        for rec_msg in recordings:
+            await update.message.reply_text(rec_msg, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await update.message.reply_text(f"An error occurred: {str(e)}")
+
 
 def _normalize_name(name):
     """Lowercase, strip, drop trailing device/junk tokens for matching."""
@@ -974,6 +1015,8 @@ def main():
     application.add_handler(CallbackQueryHandler(setalias_callback, pattern=r'^al:'))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(CommandHandler('attendance', attendance))
+    application.add_handler(CommandHandler('recording', recording))
+    application.add_handler(CommandHandler('recordings', recording))
     application.add_handler(CommandHandler('summary', summary))
     application.add_handler(CommandHandler('testschedule', test_schedule))
     application.add_handler(user_details_conv_handler)
