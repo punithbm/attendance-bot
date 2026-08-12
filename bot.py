@@ -174,11 +174,12 @@ async def get_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
-async def send_attendance_report(context: ContextTypes.DEFAULT_TYPE, batch_name: str = None):
+async def send_attendance_report(context: ContextTypes.DEFAULT_TYPE, batch_name: str = None, mode: str = 'both'):
     """
-    Send attendance report to the group.
+    Send attendance report and/or recordings to the group.
     This function is called by the scheduler.
     If batch_name is provided, the report is limited to that batch.
+    mode: 'attendance' (evening summary), 'recordings' (afternoon links), or 'both'.
     """
     try:
         # Use IST timezone to match scheduler configuration
@@ -189,28 +190,30 @@ async def send_attendance_report(context: ContextTypes.DEFAULT_TYPE, batch_name:
         attendance_text = result["attendance"]
         recordings = result["recordings"]
 
-        # Split message if it's too long (Telegram limit is 4096 chars)
-        if len(attendance_text) > 4000:
-            for x in range(0, len(attendance_text), 4000):
+        if mode in ('both', 'attendance'):
+            # Split message if it's too long (Telegram limit is 4096 chars)
+            if len(attendance_text) > 4000:
+                for x in range(0, len(attendance_text), 4000):
+                    await context.bot.send_message(
+                        chat_id=GROUP_CHAT_ID,
+                        text=attendance_text[x:x+4000],
+                        parse_mode=ParseMode.HTML
+                    )
+            else:
                 await context.bot.send_message(
                     chat_id=GROUP_CHAT_ID,
-                    text=attendance_text[x:x+4000],
+                    text=attendance_text,
                     parse_mode=ParseMode.HTML
                 )
-        else:
-            await context.bot.send_message(
-                chat_id=GROUP_CHAT_ID,
-                text=attendance_text,
-                parse_mode=ParseMode.HTML
-            )
 
-        # Send each recording as its own message so it can be forwarded cleanly
-        for rec_msg in recordings:
-            await context.bot.send_message(
-                chat_id=GROUP_CHAT_ID,
-                text=rec_msg,
-                parse_mode=ParseMode.HTML
-            )
+        if mode in ('both', 'recordings'):
+            # Send each recording as its own message so it can be forwarded cleanly
+            for rec_msg in recordings:
+                await context.bot.send_message(
+                    chat_id=GROUP_CHAT_ID,
+                    text=rec_msg,
+                    parse_mode=ParseMode.HTML
+                )
     except Exception as e:
         error_msg = f"An error occurred while sending attendance report: {str(e)}"
         print(error_msg)
@@ -904,12 +907,30 @@ async def setup_scheduler(application: Application):
             id='weekly_attendance_report',
             name='Send attendance report to group',
             replace_existing=True,
-            kwargs={'context': scheduler_context}
+            kwargs={'context': scheduler_context, 'mode': 'attendance'}
         )
         next_run = getattr(job, "next_run_time", None)
         print("Scheduler started: Attendance reports will be sent Mon/Wed/Fri at 9:30 PM IST")
         if next_run:
             print(f"Next run time: {next_run}")
+
+        rec_job = job_queue.scheduler.add_job(
+            send_attendance_report,
+            trigger=CronTrigger(
+                day_of_week='mon,wed,fri',
+                hour=14,
+                minute=0,
+                timezone=pytz.timezone('Asia/Kolkata')
+            ),
+            id='afternoon_recordings',
+            name='Send class recordings to group',
+            replace_existing=True,
+            kwargs={'context': scheduler_context, 'mode': 'recordings'}
+        )
+        rec_next = getattr(rec_job, "next_run_time", None)
+        print("Scheduler started: Recording links will be sent Mon/Wed/Fri at 2:00 PM IST")
+        if rec_next:
+            print(f"Next recordings run: {rec_next}")
     except Exception as e:
         print(f"ERROR setting up scheduler: {str(e)}")
         import traceback
